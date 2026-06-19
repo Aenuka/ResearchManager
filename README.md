@@ -43,10 +43,10 @@ Create an Atlas Free cluster, add a database user, allow network access from you
 
 Create a Railway service from this GitHub repo and configure it as the backend service:
 
-- Root directory: `server`
-- Config file path: `/server/railway.json`
-- Build command: `npm install`
-- Start command: `npm start`
+- Root directory: leave empty, or use the repository root
+- Config file path: `/railway.json`
+- Build command: `npm install --prefix server`
+- Start command: `npm start --prefix server`
 - Health check path: `/api/health`
 
 Set these Railway environment variables:
