@@ -12,7 +12,7 @@ function getJwtSecret() {
 
   return process.env.JWT_SECRET;
 }
-
+// 
 function getLoginPassword() {
   if (!process.env.LOGIN_PASSWORD) {
     throw new Error('LOGIN_PASSWORD is required');
