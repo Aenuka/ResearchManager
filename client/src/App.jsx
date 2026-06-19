@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001').replace(/\/$/, '');
+function normalizeApiBase(value) {
+  return (value || 'http://localhost:5001')
+    .trim()
+    .replace(/^['"]|['"]$/g, '')
+    .replace(/\/+$/, '');
+}
+
+const API_BASE = normalizeApiBase(import.meta.env.VITE_API_BASE_URL);
 const AUTH_STORAGE_KEY = 'research-manager-auth';
 
 const emptySection = {
