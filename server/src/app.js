@@ -29,6 +29,14 @@ app.use(express.json());
 app.use(morgan('dev'));
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
+app.get('/', (req, res) => {
+  res.json({
+    name: 'Research Manager API',
+    status: 'ok',
+    health: '/api/health',
+  });
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
