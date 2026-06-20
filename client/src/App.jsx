@@ -43,6 +43,18 @@ function formatTimer(totalSeconds) {
   return `${minutes}:${seconds}`;
 }
 
+function formatDateTime(value) {
+  if (!value) return 'Unknown date';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Unknown date';
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date);
+}
+
 function getAudioExtension(mimeType = '') {
   if (mimeType.includes('mp4')) return 'm4a';
   if (mimeType.includes('ogg')) return 'ogg';
@@ -76,8 +88,16 @@ function getResourceImages(resource) {
   return resource.images || [];
 }
 
-function getAudioAddedBy(audio, resource) {
-  return audio.addedByName || audio.addedByEmail || resource.creatorName || resource.creatorEmail || 'Unknown';
+function getFileName(file, fallback) {
+  return file.originalName || file.name || file.fileName || fallback;
+}
+
+function getFileAddedBy(file, resource) {
+  return file.addedByName || file.addedByEmail || resource.creatorName || resource.creatorEmail || 'Unknown';
+}
+
+function getFileAddedAt(file, resource) {
+  return file.addedAt || resource.createdAt;
 }
 
 function readStoredAuth() {
@@ -677,6 +697,13 @@ function App() {
                             ? `${resourceForm.pdfs.length} PDF selected`
                             : 'Choose PDFs'}
                         </strong>
+                        {resourceForm.pdfs.length ? (
+                          <ul className="selected-file-list">
+                            {resourceForm.pdfs.map((file) => (
+                              <li key={`${file.name}-${file.size}`}>{getFileName(file, 'PDF file')}</li>
+                            ))}
+                          </ul>
+                        ) : null}
                       </label>
                       <label className="file-drop">
                         <span>Images</span>
@@ -696,6 +723,13 @@ function App() {
                             ? `${resourceForm.images.length} images selected`
                             : 'Choose images'}
                         </strong>
+                        {resourceForm.images.length ? (
+                          <ul className="selected-file-list">
+                            {resourceForm.images.map((file) => (
+                              <li key={`${file.name}-${file.size}`}>{getFileName(file, 'Image file')}</li>
+                            ))}
+                          </ul>
+                        ) : null}
                       </label>
                       <label className="file-drop">
                         <span>Audio Files</span>
@@ -720,6 +754,13 @@ function App() {
                             ? `${resourceForm.audios.length} recordings ready`
                             : 'Choose or record audio'}
                         </strong>
+                        {resourceForm.audios.length ? (
+                          <ul className="selected-file-list">
+                            {resourceForm.audios.map((file) => (
+                              <li key={`${file.name}-${file.size}`}>{getFileName(file, 'Audio recording')}</li>
+                            ))}
+                          </ul>
+                        ) : null}
                       </label>
                       <div className="file-drop">
                         <span>Voice Recorder</span>
@@ -794,27 +835,50 @@ function App() {
 
                   <div className="asset-row">
                     {getResourceImages(resource).map((image) => (
-                      <a
-                        className="image-link"
-                        href={`${API_BASE}${image.url}`}
-                        key={image.url}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        <img src={`${API_BASE}${image.url}`} alt={image.originalName} />
-                      </a>
+                      <div className="asset-item image-asset" key={image.url}>
+                        <span className="asset-kind">IMG</span>
+                        <a
+                          className="image-link"
+                          href={`${API_BASE}${image.url}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <img src={`${API_BASE}${image.url}`} alt={getFileName(image, 'Image file')} />
+                        </a>
+                        <div className="asset-details">
+                          <strong title={getFileName(image, 'Image file')}>
+                            {getFileName(image, 'Image file')}
+                          </strong>
+                          <span>Added by {getFileAddedBy(image, resource)}</span>
+                          <span>{formatDateTime(getFileAddedAt(image, resource))}</span>
+                        </div>
+                      </div>
                     ))}
                     {getResourcePdfs(resource).map((pdf) => (
-                      <a href={`${API_BASE}${pdf.url}`} key={pdf.url} target="_blank" rel="noreferrer">
-                        PDF · {formatBytes(pdf.size)}
-                      </a>
+                      <div className="asset-item" key={pdf.url}>
+                        <span className="asset-kind">PDF</span>
+                        <div className="asset-details">
+                          <strong title={getFileName(pdf, 'PDF file')}>
+                            {getFileName(pdf, 'PDF file')}
+                          </strong>
+                          <a href={`${API_BASE}${pdf.url}`} target="_blank" rel="noreferrer">
+                            Open PDF · {formatBytes(pdf.size)}
+                          </a>
+                          <span>Added by {getFileAddedBy(pdf, resource)}</span>
+                          <span>{formatDateTime(getFileAddedAt(pdf, resource))}</span>
+                        </div>
+                      </div>
                     ))}
                     {getResourceAudios(resource).map((audio) => (
-                      <div className="audio-asset" key={audio.url}>
-                        <audio controls src={`${API_BASE}${audio.url}`}>
-                          <a href={`${API_BASE}${audio.url}`}>Audio recording</a>
-                        </audio>
-                        <span>Recording added by {getAudioAddedBy(audio, resource)}</span>
+                      <div className="asset-item audio-asset" key={audio.url}>
+                        <span className="asset-kind">AUD</span>
+                        <div className="asset-details">
+                          <audio controls src={`${API_BASE}${audio.url}`}>
+                            <a href={`${API_BASE}${audio.url}`}>Audio recording</a>
+                          </audio>
+                          <span>Recording added by {getFileAddedBy(audio, resource)}</span>
+                          <span>{formatDateTime(getFileAddedAt(audio, resource))}</span>
+                        </div>
                       </div>
                     ))}
                   </div>

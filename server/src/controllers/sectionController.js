@@ -11,6 +11,7 @@ function filePayload(file, folder, addedBy) {
     url: `/uploads/${folder}/${file.filename}`,
     addedByName: addedBy?.name || '',
     addedByEmail: addedBy?.email || '',
+    addedAt: new Date(),
   };
 }
 
@@ -60,9 +61,9 @@ async function addResource(req, res, next) {
     const resource = {
       title: req.body.title,
       description: req.body.description,
-      pdfs: filePayloads(uploadedFiles(req, 'pdf', 'pdfs'), 'pdfs'),
+      pdfs: filePayloads(uploadedFiles(req, 'pdf', 'pdfs'), 'pdfs', req.user),
       audios: filePayloads(uploadedFiles(req, 'audio', 'audios'), 'audio', req.user),
-      images: filePayloads(uploadedFiles(req, 'image', 'images'), 'images'),
+      images: filePayloads(uploadedFiles(req, 'image', 'images'), 'images', req.user),
       creatorName: req.user.name,
       creatorEmail: req.user.email,
       updatedByName: req.user.name,
@@ -104,7 +105,7 @@ async function updateResource(req, res, next) {
     resource.description = req.body.description ?? resource.description;
     resource.pdfs = [
       ...(resource.pdfs || []),
-      ...filePayloads(uploadedFiles(req, 'pdf', 'pdfs'), 'pdfs'),
+      ...filePayloads(uploadedFiles(req, 'pdf', 'pdfs'), 'pdfs', req.user),
     ];
     resource.audios = [
       ...(resource.audios || []),
@@ -112,7 +113,7 @@ async function updateResource(req, res, next) {
     ];
     resource.images = [
       ...(resource.images || []),
-      ...filePayloads(uploadedFiles(req, 'image', 'images'), 'images'),
+      ...filePayloads(uploadedFiles(req, 'image', 'images'), 'images', req.user),
     ];
     resource.updatedByName = req.user.name;
     resource.updatedByEmail = req.user.email;

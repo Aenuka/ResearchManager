@@ -305,6 +305,21 @@ button:disabled {
   margin-bottom: 7px;
 }
 
+.selected-file-list {
+  color: #59675c;
+  display: grid;
+  font-size: 0.82rem;
+  gap: 4px;
+  line-height: 1.3;
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+}
+
+.selected-file-list li {
+  overflow-wrap: anywhere;
+}
+
 .recorder {
   align-items: center;
   background: #fbfcf8;
@@ -375,32 +390,77 @@ button:disabled {
 }
 
 .asset-row {
-  align-items: center;
-  flex-wrap: wrap;
+  align-items: stretch;
+  display: grid;
+  gap: 10px;
+  justify-content: stretch;
 }
 
 .asset-row a {
-  background: #e7f0e1;
+  background: #edf5e8;
   color: #1f3a31;
-  padding: 9px 11px;
+  padding: 7px 9px;
   text-decoration: none;
 }
 
 audio {
-  max-width: 260px;
+  max-width: 100%;
   width: 100%;
 }
 
-.audio-asset {
+.asset-item {
+  align-items: start;
+  background: #fbfcf8;
+  border: 1px solid #dce4d7;
+  border-radius: 8px;
   display: grid;
-  gap: 6px;
-  max-width: 260px;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 10px;
 }
 
-.audio-asset span {
+.asset-item a {
+  justify-self: start;
+  overflow-wrap: anywhere;
+}
+
+.asset-kind {
+  align-items: center;
+  background: #e1eddb;
+  border: 1px solid #c7d8bf;
+  border-radius: 5px;
+  color: #294335;
+  display: inline-flex;
+  font-size: 0.72rem;
+  font-weight: 900;
+  height: 28px;
+  justify-content: center;
+  line-height: 1;
+  min-width: 38px;
+  padding: 0 7px;
+}
+
+.asset-details {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.asset-details strong {
+  color: #24352c;
+  font-size: 0.9rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.asset-details span {
   color: #59675c;
   font-size: 0.82rem;
   line-height: 1.35;
+}
+
+.audio-asset {
+  align-items: center;
 }
 
 .image-link {
@@ -408,6 +468,10 @@ audio {
   border: 1px solid #d5dbc8;
   display: inline-flex;
   padding: 4px !important;
+}
+
+.image-asset {
+  grid-template-columns: auto 78px minmax(0, 1fr);
 }
 
 .image-link img {
@@ -519,5 +583,16 @@ audio {
   .sidebar {
     border-bottom: 1px solid #daded2;
     border-right: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .asset-item,
+  .image-asset {
+    grid-template-columns: 1fr;
+  }
+
+  .asset-kind {
+    justify-self: start;
   }
 }

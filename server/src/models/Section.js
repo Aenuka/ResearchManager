@@ -9,6 +9,7 @@ const fileSchema = new mongoose.Schema(
     url: { type: String, required: true },
     addedByName: { type: String, trim: true, default: '' },
     addedByEmail: { type: String, trim: true, lowercase: true, default: '' },
+    addedAt: { type: Date, default: Date.now },
   },
   { _id: false }
 );
