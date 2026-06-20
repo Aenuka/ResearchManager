@@ -76,6 +76,10 @@ function getResourceImages(resource) {
   return resource.images || [];
 }
 
+function getAudioAddedBy(audio, resource) {
+  return audio.addedByName || audio.addedByEmail || resource.creatorName || resource.creatorEmail || 'Unknown';
+}
+
 function readStoredAuth() {
   try {
     return JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY)) || { token: '', user: null };
@@ -806,9 +810,12 @@ function App() {
                       </a>
                     ))}
                     {getResourceAudios(resource).map((audio) => (
-                      <audio controls key={audio.url} src={`${API_BASE}${audio.url}`}>
-                        <a href={`${API_BASE}${audio.url}`}>Audio recording</a>
-                      </audio>
+                      <div className="audio-asset" key={audio.url}>
+                        <audio controls src={`${API_BASE}${audio.url}`}>
+                          <a href={`${API_BASE}${audio.url}`}>Audio recording</a>
+                        </audio>
+                        <span>Recording added by {getAudioAddedBy(audio, resource)}</span>
+                      </div>
                     ))}
                   </div>
 

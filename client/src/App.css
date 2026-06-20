@@ -391,6 +391,18 @@ audio {
   width: 100%;
 }
 
+.audio-asset {
+  display: grid;
+  gap: 6px;
+  max-width: 260px;
+}
+
+.audio-asset span {
+  color: #59675c;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
 .image-link {
   background: transparent !important;
   border: 1px solid #d5dbc8;

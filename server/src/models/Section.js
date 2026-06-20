@@ -7,6 +7,8 @@ const fileSchema = new mongoose.Schema(
     mimeType: { type: String, required: true },
     size: { type: Number, required: true },
     url: { type: String, required: true },
+    addedByName: { type: String, trim: true, default: '' },
+    addedByEmail: { type: String, trim: true, lowercase: true, default: '' },
   },
   { _id: false }
 );

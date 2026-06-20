@@ -1,6 +1,6 @@
 const Section = require('../models/Section');
 
-function filePayload(file, folder) {
+function filePayload(file, folder, addedBy) {
   if (!file) return undefined;
 
   return {
@@ -9,11 +9,13 @@ function filePayload(file, folder) {
     mimeType: file.mimetype,
     size: file.size,
     url: `/uploads/${folder}/${file.filename}`,
+    addedByName: addedBy?.name || '',
+    addedByEmail: addedBy?.email || '',
   };
 }
 
-function filePayloads(files = [], folder) {
-  return files.map((file) => filePayload(file, folder)).filter(Boolean);
+function filePayloads(files = [], folder, addedBy) {
+  return files.map((file) => filePayload(file, folder, addedBy)).filter(Boolean);
 }
 
 function uploadedFiles(req, singular, plural) {
@@ -59,7 +61,7 @@ async function addResource(req, res, next) {
       title: req.body.title,
       description: req.body.description,
       pdfs: filePayloads(uploadedFiles(req, 'pdf', 'pdfs'), 'pdfs'),
-      audios: filePayloads(uploadedFiles(req, 'audio', 'audios'), 'audio'),
+      audios: filePayloads(uploadedFiles(req, 'audio', 'audios'), 'audio', req.user),
       images: filePayloads(uploadedFiles(req, 'image', 'images'), 'images'),
       creatorName: req.user.name,
       creatorEmail: req.user.email,
@@ -106,7 +108,7 @@ async function updateResource(req, res, next) {
     ];
     resource.audios = [
       ...(resource.audios || []),
-      ...filePayloads(uploadedFiles(req, 'audio', 'audios'), 'audio'),
+      ...filePayloads(uploadedFiles(req, 'audio', 'audios'), 'audio', req.user),
     ];
     resource.images = [
       ...(resource.images || []),
