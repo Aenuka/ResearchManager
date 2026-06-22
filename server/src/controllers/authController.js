@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { isAllowedEmail } = require('../config/allowedEmails');
+const { getAllowedUserName, isAllowedEmail } = require('../config/allowedEmails');
 
 function normalizeEmail(email = '') {
   return email.trim().toLowerCase();
@@ -38,7 +38,6 @@ function issueToken(user) {
 async function login(req, res, next) {
   try {
     const email = normalizeEmail(req.body.email);
-    const name = (req.body.name || '').trim();
     const password = req.body.password || '';
 
     if (!isAllowedEmail(email)) {
@@ -51,7 +50,7 @@ async function login(req, res, next) {
       return;
     }
 
-    const user = { email, name };
+    const user = { email, name: getAllowedUserName(email) };
 
     res.json({
       token: issueToken(user),

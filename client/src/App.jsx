@@ -25,9 +25,12 @@ const emptyResource = {
 };
 
 const emptyAuthForm = {
-  name: '',
   email: '',
   password: '',
+};
+
+const emptyChatForm = {
+  text: '',
 };
 
 function formatBytes(size = 0) {
@@ -88,6 +91,10 @@ function getResourceImages(resource) {
   return resource.images || [];
 }
 
+function getResourceMessages(resource) {
+  return resource.messages || [];
+}
+
 function getFileName(file, fallback) {
   return file.originalName || file.name || file.fileName || fallback;
 }
@@ -98,6 +105,87 @@ function getFileAddedBy(file, resource) {
 
 function getFileAddedAt(file, resource) {
   return file.addedAt || resource.createdAt;
+}
+
+function getInitials(value = 'Unknown') {
+  const words = value
+    .replace(/@.*/, '')
+    .split(/[\s._-]+/)
+    .filter(Boolean);
+
+  return (words[0]?.[0] || 'U').toUpperCase();
+}
+
+function getMessageSender(message) {
+  return message.senderName || message.senderEmail || 'Unknown';
+}
+
+function getMessageSenderEmail(message) {
+  return message.senderEmail || '';
+}
+
+function getMessageCreatedAt(message) {
+  return message.createdAt;
+}
+
+function getResourceFiles(resource) {
+  return [
+    ...getResourceImages(resource),
+    ...getResourcePdfs(resource),
+    ...getResourceAudios(resource),
+  ];
+}
+
+function getResourceCounts(resource) {
+  return {
+    images: getResourceImages(resource).length,
+    pdfs: getResourcePdfs(resource).length,
+    audios: getResourceAudios(resource).length,
+    messages: getResourceMessages(resource).length,
+    total: getResourceFiles(resource).length,
+  };
+}
+
+function getResourceChatItems(resource) {
+  return [
+    ...getResourceMessages(resource).map((message) => ({
+      id: message._id || `${message.createdAt}-${message.text}`,
+      type: 'message',
+      createdAt: getMessageCreatedAt(message),
+      sender: getMessageSender(message),
+      senderEmail: getMessageSenderEmail(message),
+      message,
+    })),
+    ...getResourceAudios(resource).map((audio) => ({
+      id: audio.url,
+      type: 'audio',
+      createdAt: getFileAddedAt(audio, resource),
+      sender: getFileAddedBy(audio, resource),
+      senderEmail: audio.addedByEmail || '',
+      audio,
+    })),
+  ].sort((first, second) => {
+    const firstTime = new Date(first.createdAt || 0).getTime();
+    const secondTime = new Date(second.createdAt || 0).getTime();
+    return firstTime - secondTime;
+  });
+}
+
+function matchesResourceSearch(resource, searchTerm) {
+  const query = searchTerm.trim().toLowerCase();
+  if (!query) return true;
+
+  const searchableText = [
+    resource.title,
+    resource.description,
+    ...getResourceMessages(resource).map((message) => message.text),
+    ...getResourceFiles(resource).map((file) => getFileName(file, '')),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return searchableText.includes(query);
 }
 
 function readStoredAuth() {
@@ -117,17 +205,27 @@ function App() {
   const [sectionForm, setSectionForm] = useState(emptySection);
   const [resourceForm, setResourceForm] = useState(emptyResource);
   const [isResourceModalOpen, setIsResourceModalOpen] = useState(false);
+  const [chatResourceId, setChatResourceId] = useState('');
+  const [chatForm, setChatForm] = useState(emptyChatForm);
   const [editingResourceId, setEditingResourceId] = useState('');
   const [recordingStatus, setRecordingStatus] = useState('idle');
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [recordedAudioUrls, setRecordedAudioUrls] = useState([]);
+  const [chatRecordingStatus, setChatRecordingStatus] = useState('idle');
+  const [chatRecordingSeconds, setChatRecordingSeconds] = useState(0);
   const [isLoading, setIsLoading] = useState(Boolean(auth.token));
   const [isSavingSection, setIsSavingSection] = useState(false);
   const [isSavingResource, setIsSavingResource] = useState(false);
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
+  const [isUploadingChatAudio, setIsUploadingChatAudio] = useState(false);
   const [message, setMessage] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
   const mediaRecorderRef = useRef(null);
   const recordingChunksRef = useRef([]);
   const streamRef = useRef(null);
+  const chatMediaRecorderRef = useRef(null);
+  const chatRecordingChunksRef = useRef([]);
+  const chatStreamRef = useRef(null);
 
   const activeSection = useMemo(
     () => sections.find((section) => section._id === activeSectionId) || sections[0],
@@ -148,6 +246,24 @@ function App() {
       images: resources.reduce((total, resource) => total + getResourceImages(resource).length, 0),
     };
   }, [sections]);
+
+  const visibleResources = useMemo(
+    () => (activeSection?.resources || []).filter((resource) => matchesResourceSearch(resource, searchTerm)),
+    [activeSection, searchTerm]
+  );
+
+  const activeSectionFileCount = useMemo(
+    () => (activeSection?.resources || []).reduce(
+      (total, resource) => total + getResourceFiles(resource).length,
+      0
+    ),
+    [activeSection]
+  );
+
+  const activeChatResource = useMemo(
+    () => (activeSection?.resources || []).find((resource) => resource._id === chatResourceId),
+    [activeSection, chatResourceId]
+  );
 
   const isLoggedIn = Boolean(auth.token);
 
@@ -224,10 +340,21 @@ function App() {
     return () => window.clearInterval(intervalId);
   }, [recordingStatus]);
 
+  useEffect(() => {
+    if (chatRecordingStatus !== 'recording') return undefined;
+
+    const intervalId = window.setInterval(() => {
+      setChatRecordingSeconds((current) => current + 1);
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [chatRecordingStatus]);
+
   useEffect(
     () => () => {
       recordedAudioUrls.forEach((url) => URL.revokeObjectURL(url));
       streamRef.current?.getTracks().forEach((track) => track.stop());
+      chatStreamRef.current?.getTracks().forEach((track) => track.stop());
     },
     [recordedAudioUrls]
   );
@@ -265,6 +392,107 @@ function App() {
   function closeResourceModal() {
     resetResourceModal();
     setIsResourceModalOpen(false);
+  }
+
+  function openChat(resourceId) {
+    setChatResourceId(resourceId);
+    setChatForm(emptyChatForm);
+  }
+
+  function closeChat() {
+    if (chatMediaRecorderRef.current?.state === 'recording') {
+      chatMediaRecorderRef.current.stop();
+    }
+
+    chatStreamRef.current?.getTracks().forEach((track) => track.stop());
+    chatStreamRef.current = null;
+    chatRecordingChunksRef.current = [];
+    setChatResourceId('');
+    setChatForm(emptyChatForm);
+    setChatRecordingStatus('idle');
+    setChatRecordingSeconds(0);
+  }
+
+  async function uploadChatRecording(audioFile) {
+    if (!activeSection || !activeChatResource) return;
+
+    setIsUploadingChatAudio(true);
+    setMessage('');
+
+    const body = new FormData();
+    body.append('audios', audioFile);
+
+    try {
+      const response = await apiFetch(
+        `/api/sections/${activeSection._id}/resources/${activeChatResource._id}`,
+        {
+          method: 'PUT',
+          body,
+        }
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to upload voice message');
+      setSections((current) =>
+        current.map((section) => (section._id === data._id ? data : section))
+      );
+      setChatRecordingStatus('ready');
+    } catch (error) {
+      setChatRecordingStatus('idle');
+      setMessage(error.message);
+    } finally {
+      setIsUploadingChatAudio(false);
+    }
+  }
+
+  async function startChatRecording() {
+    setMessage('');
+
+    if (!activeChatResource) return;
+
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      setMessage('Audio recording is not supported in this browser.');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = getSupportedAudioMimeType();
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+
+      chatRecordingChunksRef.current = [];
+      chatStreamRef.current = stream;
+      chatMediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chatRecordingChunksRef.current.push(event.data);
+      };
+
+      recorder.onstop = () => {
+        const audioType = recorder.mimeType || mimeType || 'audio/webm';
+        const audioBlob = new Blob(chatRecordingChunksRef.current, { type: audioType });
+        const extension = getAudioExtension(audioType);
+        const audioFile = new File([audioBlob], `chat-voice-${Date.now()}.${extension}`, {
+          type: audioType,
+        });
+
+        stream.getTracks().forEach((track) => track.stop());
+        chatStreamRef.current = null;
+        uploadChatRecording(audioFile);
+      };
+
+      setChatRecordingSeconds(0);
+      setChatRecordingStatus('recording');
+      recorder.start();
+    } catch (error) {
+      setChatRecordingStatus('idle');
+      setMessage(error.name === 'NotAllowedError' ? 'Microphone permission was denied.' : error.message);
+    }
+  }
+
+  function stopChatRecording() {
+    if (chatMediaRecorderRef.current?.state === 'recording') {
+      chatMediaRecorderRef.current.stop();
+    }
   }
 
   async function startRecording() {
@@ -441,6 +669,61 @@ function App() {
     }
   }
 
+  async function deleteResourceFile(resourceId, fileUrl) {
+    if (!activeSection) return;
+
+    try {
+      const response = await apiFetch(
+        `/api/sections/${activeSection._id}/resources/${resourceId}/files`,
+        {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileUrl }),
+        }
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to delete file');
+      setSections((current) =>
+        current.map((section) => (section._id === data._id ? data : section))
+      );
+      setMessage('File deleted.');
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
+  async function sendChatMessage(event) {
+    event.preventDefault();
+    if (!activeSection || !activeChatResource) return;
+
+    const text = chatForm.text.trim();
+    if (!text) return;
+
+    setIsSendingMessage(true);
+    setMessage('');
+
+    try {
+      const response = await apiFetch(
+        `/api/sections/${activeSection._id}/resources/${activeChatResource._id}/messages`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        }
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to send message');
+      setSections((current) =>
+        current.map((section) => (section._id === data._id ? data : section))
+      );
+      setChatForm(emptyChatForm);
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setIsSendingMessage(false);
+    }
+  }
+
   async function deleteSection(sectionId) {
     try {
       const response = await apiFetch(`/api/sections/${sectionId}`, {
@@ -467,17 +750,6 @@ function App() {
               <p className="eyebrow">Research Manager</p>
               <h1>Login</h1>
             </div>
-            <label>
-              <span>Name</span>
-              <input
-                required
-                value={authForm.name}
-                onChange={(event) =>
-                  setAuthForm((current) => ({ ...current, name: event.target.value }))
-                }
-                placeholder="Your name"
-              />
-            </label>
             <label>
               <span>Gmail</span>
               <input
@@ -516,13 +788,20 @@ function App() {
             <p className="eyebrow">Research Manager</p>
             <h1>Sections</h1>
           </div>
-          <button className="count-pill" type="button" onClick={() => logout()}>
+          <button className="ghost-button compact-button" type="button" onClick={() => logout()}>
             Logout
           </button>
         </div>
-        <p className="signed-in">{auth.user?.email}</p>
+        <div className="account-strip">
+          <span>Signed in</span>
+          <strong>{auth.user?.email}</strong>
+        </div>
 
         <form className="panel form-panel" onSubmit={createSection}>
+          <div>
+            <p className="eyebrow">New Section</p>
+            <h3>Organize a topic</h3>
+          </div>
           <label>
             <span>Title</span>
             <input
@@ -550,6 +829,10 @@ function App() {
           </button>
         </form>
 
+        <div className="section-list-header">
+          <p className="eyebrow">Workspace</p>
+          <span>{sections.length} sections</span>
+        </div>
         <div className="section-list" aria-live="polite">
           {isLoading ? <p className="muted">Loading sections...</p> : null}
           {!isLoading && sections.length === 0 ? (
@@ -564,9 +847,12 @@ function App() {
               onClick={() => setActiveSectionId(section._id)}
               type="button"
             >
-              <strong>{section.title}</strong>
-              <span>{section.resources.length} resources</span>
-              <span>Created by {section.creatorName || 'Unknown'}</span>
+              <span className="section-button-main">
+                <strong>{section.title}</strong>
+                <span className="count-pill">{section.resources.length}</span>
+              </span>
+              <span>{section.resources.length === 1 ? '1 resource' : `${section.resources.length} resources`}</span>
+              <span>{section.creatorName || 'Unknown'}</span>
             </button>
           ))}
         </div>
@@ -578,9 +864,10 @@ function App() {
         {activeSection ? (
           <>
             <section className="dashboard-summary" aria-label="Dashboard summary">
-              <div>
+              <div className="dashboard-title">
                 <p className="eyebrow">Dashboard</p>
                 <h2>Research Library</h2>
+                <p>Scan your saved sections, files, recordings, and images in one place.</p>
               </div>
               <div className="stat-grid">
                 <div className="stat-card">
@@ -611,6 +898,11 @@ function App() {
                 <p className="eyebrow">Active Section</p>
                 <h2>{activeSection.title}</h2>
                 {activeSection.description ? <p>{activeSection.description}</p> : null}
+                <div className="section-metrics" aria-label="Section file summary">
+                  <span>{activeSection.resources.length} resources</span>
+                  <span>{visibleResources.length} visible</span>
+                  <span>{activeSectionFileCount} files</span>
+                </div>
                 <p className="meta-line">
                   Created by {activeSection.creatorName || 'Unknown'}
                   {activeSection.updatedByName
@@ -628,9 +920,21 @@ function App() {
             </header>
 
             <div className="toolbar-row">
-              <button type="button" onClick={openAddResourceModal}>
-                Add Resource
-              </button>
+              <label className="search-field">
+                <span>Search files</span>
+                <input
+                  type="search"
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  placeholder="Search by file name or title"
+                />
+              </label>
+              <div className="toolbar-actions">
+                <span>{visibleResources.length} shown</span>
+                <button className="primary-action" type="button" onClick={openAddResourceModal}>
+                  Add Resource
+                </button>
+              </div>
             </div>
 
             {isResourceModalOpen ? (
@@ -817,6 +1121,122 @@ function App() {
               </div>
             ) : null}
 
+            {activeChatResource ? (
+              <div className="modal-backdrop" role="presentation">
+                <section className="panel modal-panel voice-modal-panel" aria-label="Resource chat">
+                  <div className="modal-header">
+                    <div>
+                      <p className="eyebrow">Chat</p>
+                      <h3>{activeChatResource.title}</h3>
+                    </div>
+                    <button className="ghost-button" type="button" onClick={closeChat}>
+                      Close
+                    </button>
+                  </div>
+
+                  <section className="voice-thread voice-thread-popup" aria-label="Chat messages">
+                    <div className="voice-thread-header">
+                      <span>Group chat</span>
+                      <strong>{getResourceChatItems(activeChatResource).length}</strong>
+                    </div>
+                    <div className="voice-message-list">
+                      {getResourceChatItems(activeChatResource).length === 0 ? (
+                        <div className="chat-empty-state">
+                          <h3>No messages yet</h3>
+                          <p>Start the conversation with a text message or add a voice note.</p>
+                        </div>
+                      ) : null}
+
+                      {getResourceChatItems(activeChatResource).map((chatItem) => {
+                        const sender = chatItem.sender;
+                        const isOwnMessage =
+                          chatItem.senderEmail === auth.user?.email ||
+                          sender === auth.user?.email ||
+                          sender === auth.user?.name;
+
+                        return (
+                          <article
+                            className={`voice-message ${isOwnMessage ? 'is-own' : ''}`}
+                            key={`${chatItem.type}-${chatItem.id}`}
+                          >
+                            <span className="voice-avatar" aria-hidden="true">
+                              {getInitials(sender)}
+                            </span>
+                            <div className={`voice-bubble ${chatItem.type === 'message' ? 'text-bubble' : ''}`}>
+                              <div className="voice-meta">
+                                <strong>{sender}</strong>
+                                <span>{formatDateTime(chatItem.createdAt)}</span>
+                              </div>
+                              {chatItem.type === 'message' ? (
+                                <p className="chat-text">{chatItem.message.text}</p>
+                              ) : (
+                                <>
+                                  <div className="voice-player-row">
+                                    <span className="voice-icon" aria-hidden="true" />
+                                    <audio controls src={`${API_BASE}${chatItem.audio.url}`}>
+                                      <a href={`${API_BASE}${chatItem.audio.url}`}>Audio recording</a>
+                                    </audio>
+                                  </div>
+                                  <div className="voice-actions">
+                                    <span title={getFileName(chatItem.audio, 'Audio recording')}>
+                                      {getFileName(chatItem.audio, 'Audio recording')}
+                                    </span>
+                                    <button
+                                      className="asset-delete-button"
+                                      type="button"
+                                      onClick={() =>
+                                        deleteResourceFile(activeChatResource._id, chatItem.audio.url)
+                                      }
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </section>
+
+                  <form className="chat-composer" onSubmit={sendChatMessage}>
+                    <label>
+                      <span>Message</span>
+                      <input
+                        maxLength="2000"
+                        placeholder="Type a message"
+                        value={chatForm.text}
+                        onChange={(event) =>
+                          setChatForm((current) => ({ ...current, text: event.target.value }))
+                        }
+                      />
+                    </label>
+                    <div className="chat-record-control">
+                      <span>{formatTimer(chatRecordingSeconds)}</span>
+                      {chatRecordingStatus === 'recording' ? (
+                        <button type="button" onClick={stopChatRecording}>
+                          Stop
+                        </button>
+                      ) : (
+                        <button
+                          className="ghost-button"
+                          disabled={isUploadingChatAudio}
+                          type="button"
+                          onClick={startChatRecording}
+                        >
+                          {isUploadingChatAudio ? 'Uploading...' : 'Record'}
+                        </button>
+                      )}
+                    </div>
+                    <button type="submit" disabled={isSendingMessage || !chatForm.text.trim()}>
+                      {isSendingMessage ? 'Sending...' : 'Send'}
+                    </button>
+                  </form>
+                </section>
+              </div>
+            ) : null}
+
             <div className="resource-list">
               {activeSection.resources.length === 0 ? (
                 <div className="empty-state">
@@ -825,16 +1245,50 @@ function App() {
                 </div>
               ) : null}
 
-              {activeSection.resources.map((resource) => (
-                <article className="resource-card" key={resource._id}>
-                  <div className="resource-main">
-                    <h3>{resource.title}</h3>
-                    {resource.description ? <p>{resource.description}</p> : null}
-                    <p className="meta-line">Added by {resource.creatorName || 'Unknown'}</p>
+              {activeSection.resources.length > 0 && visibleResources.length === 0 ? (
+                <div className="empty-state">
+                  <h3>No matching files</h3>
+                  <p>Try another file name or resource title.</p>
+                </div>
+              ) : null}
+
+              {visibleResources.map((resource) => {
+                const images = getResourceImages(resource);
+                const pdfs = getResourcePdfs(resource);
+                const audios = getResourceAudios(resource);
+                const counts = getResourceCounts(resource);
+
+                return (
+                  <article className="resource-card" key={resource._id}>
+                  <div className="resource-card-header">
+                    <div className="resource-main">
+                      <p className="eyebrow">Resource</p>
+                      <h3>{resource.title}</h3>
+                      {resource.description ? <p>{resource.description}</p> : null}
+                      <p className="meta-line">Added by {resource.creatorName || 'Unknown'}</p>
+                    </div>
+
+                    <div className="card-actions">
+                      <button type="button" onClick={() => openEditResourceModal(resource)}>
+                        Edit
+                      </button>
+                      <button className="danger-button" type="button" onClick={() => deleteResource(resource._id)}>
+                        Remove
+                      </button>
+                    </div>
                   </div>
 
+                  <div className="resource-file-summary" aria-label="Resource file summary">
+                    <span>{counts.total} files</span>
+                    <span>{counts.images} images</span>
+                    <span>{counts.pdfs} PDFs</span>
+                    <span>{counts.audios} audio</span>
+                    <span>{counts.messages} messages</span>
+                  </div>
+
+                  {images.length || pdfs.length ? (
                   <div className="asset-row">
-                    {getResourceImages(resource).map((image) => (
+                    {images.map((image) => (
                       <div className="asset-item image-asset" key={image.url}>
                         <span className="asset-kind">IMG</span>
                         <a
@@ -851,10 +1305,17 @@ function App() {
                           </strong>
                           <span>Added by {getFileAddedBy(image, resource)}</span>
                           <span>{formatDateTime(getFileAddedAt(image, resource))}</span>
+                          <button
+                            className="asset-delete-button"
+                            type="button"
+                            onClick={() => deleteResourceFile(resource._id, image.url)}
+                          >
+                            Delete
+                          </button>
                         </div>
                       </div>
                     ))}
-                    {getResourcePdfs(resource).map((pdf) => (
+                    {pdfs.map((pdf) => (
                       <div className="asset-item" key={pdf.url}>
                         <span className="asset-kind">PDF</span>
                         <div className="asset-details">
@@ -866,33 +1327,34 @@ function App() {
                           </a>
                           <span>Added by {getFileAddedBy(pdf, resource)}</span>
                           <span>{formatDateTime(getFileAddedAt(pdf, resource))}</span>
+                          <button
+                            className="asset-delete-button"
+                            type="button"
+                            onClick={() => deleteResourceFile(resource._id, pdf.url)}
+                          >
+                            Delete
+                          </button>
                         </div>
                       </div>
                     ))}
-                    {getResourceAudios(resource).map((audio) => (
-                      <div className="asset-item audio-asset" key={audio.url}>
-                        <span className="asset-kind">AUD</span>
-                        <div className="asset-details">
-                          <audio controls src={`${API_BASE}${audio.url}`}>
-                            <a href={`${API_BASE}${audio.url}`}>Audio recording</a>
-                          </audio>
-                          <span>Recording added by {getFileAddedBy(audio, resource)}</span>
-                          <span>{formatDateTime(getFileAddedAt(audio, resource))}</span>
-                        </div>
-                      </div>
-                    ))}
+                  </div>
+                  ) : null}
+
+                  <div className="voice-launch">
+                    <div>
+                      <p className="eyebrow">Chat</p>
+                      <strong>
+                        {counts.messages} messages · {audios.length} voice notes
+                      </strong>
+                    </div>
+                    <button type="button" onClick={() => openChat(resource._id)}>
+                      Open Chat
+                    </button>
                   </div>
 
-                  <div className="card-actions">
-                    <button type="button" onClick={() => openEditResourceModal(resource)}>
-                      Edit
-                    </button>
-                    <button type="button" onClick={() => deleteResource(resource._id)}>
-                      Remove
-                    </button>
-                  </div>
-                </article>
-              ))}
+                  </article>
+                );
+              })}
             </div>
           </>
         ) : (

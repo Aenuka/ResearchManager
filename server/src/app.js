@@ -7,20 +7,24 @@ const requireAuth = require('./middleware/auth');
 const sectionRoutes = require('./routes/sectionRoutes');
 
 const app = express();
-const allowedOrigins = (process.env.CLIENT_ORIGIN || 'http://localhost:5173')
+const localOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173'];
+const configuredOrigins = (process.env.CLIENT_ORIGIN || '')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
+const allowedOrigins = new Set([...localOrigins, ...configuredOrigins]);
 
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin || allowedOrigins.has(origin)) {
         callback(null, true);
         return;
       }
 
-      callback(new Error('Not allowed by CORS'));
+      const error = new Error('Not allowed by CORS');
+      error.status = 403;
+      callback(error);
     },
     optionsSuccessStatus: 204,
   })

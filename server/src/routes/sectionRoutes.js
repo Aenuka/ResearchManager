@@ -1,7 +1,9 @@
 const express = require('express');
 const {
+  addResourceMessage,
   addResource,
   createSection,
+  deleteResourceFile,
   deleteResource,
   deleteSection,
   getSections,
@@ -38,6 +40,8 @@ router.put(
   ]),
   updateResource
 );
+router.delete('/:sectionId/resources/:resourceId/files', deleteResourceFile);
+router.post('/:sectionId/resources/:resourceId/messages', addResourceMessage);
 router.delete('/:sectionId/resources/:resourceId', deleteResource);
 
 module.exports = router;
