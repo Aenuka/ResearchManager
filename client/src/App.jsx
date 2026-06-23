@@ -15,7 +15,10 @@ function normalizeApiBase(value) {
 const API_BASE = normalizeApiBase(import.meta.env.VITE_API_BASE_URL);
 const AUTH_STORAGE_KEY = 'research-manager-auth';
 const CHATGPT_RESEARCH_PROMPT =
-  'Translate this research paper part into easy English. exam difficult keywords.';
+  'Act as an research paper reading student. Translate the following research paper section into clear, simple English while preserving the original meaning. if there is any technical terms, academic jargon, formulas, models, and difficult english words, please explain them with simple dictionary definitions.keep that same word limit. no need for long text';
+const PDF_ZOOM_MIN = 0.7;
+const PDF_ZOOM_MAX = 2.6;
+const PDF_ZOOM_STEP = 0.15;
 
 const emptySection = {
   title: '',
@@ -182,6 +185,78 @@ function buildChatGptUrl(selectedText) {
   return `https://chatgpt.com/?q=${encodeURIComponent(prompt)}`;
 }
 
+function PdfPage({ page, pageNumber, scale }) {
+  const canvasRef = useRef(null);
+  const textLayerRef = useRef(null);
+  const [renderError, setRenderError] = useState('');
+
+  useEffect(() => {
+    let isCancelled = false;
+    let renderTask = null;
+    let textLayer = null;
+
+    async function renderPage() {
+      const canvas = canvasRef.current;
+      const textLayerDiv = textLayerRef.current;
+      if (!canvas || !textLayerDiv) return;
+
+      try {
+        setRenderError('');
+        const viewport = page.getViewport({ scale });
+        const pixelRatio = window.devicePixelRatio || 1;
+        const context = canvas.getContext('2d');
+
+        canvas.width = Math.floor(viewport.width * pixelRatio);
+        canvas.height = Math.floor(viewport.height * pixelRatio);
+        canvas.style.width = `${viewport.width}px`;
+        canvas.style.height = `${viewport.height}px`;
+        textLayerDiv.style.width = `${viewport.width}px`;
+        textLayerDiv.style.height = `${viewport.height}px`;
+        textLayerDiv.replaceChildren();
+
+        context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+        renderTask = page.render({ canvasContext: context, viewport });
+        await renderTask.promise;
+
+        if (isCancelled) return;
+
+        textLayer = new pdfjsLib.TextLayer({
+          container: textLayerDiv,
+          textContentSource: page.streamTextContent({
+            includeMarkedContent: true,
+            disableNormalization: true,
+          }),
+          viewport,
+        });
+        await textLayer.render();
+      } catch (error) {
+        if (!isCancelled && error.name !== 'RenderingCancelledException') {
+          setRenderError(error.message || 'Unable to render this page.');
+        }
+      }
+    }
+
+    renderPage();
+
+    return () => {
+      isCancelled = true;
+      renderTask?.cancel();
+      textLayer?.cancel();
+    };
+  }, [page, scale]);
+
+  return (
+    <article className="pdf-page" aria-label={`Page ${pageNumber}`}>
+      <div className="pdf-page-number">Page {pageNumber}</div>
+      {renderError ? <div className="status-line">{renderError}</div> : null}
+      <div className="pdf-page-canvas-wrap">
+        <canvas ref={canvasRef} />
+        <div className="textLayer" ref={textLayerRef} />
+      </div>
+    </article>
+  );
+}
+
 function matchesResourceSearch(resource, searchTerm) {
   const query = searchTerm.trim().toLowerCase();
   if (!query) return true;
@@ -235,8 +310,12 @@ function App() {
     file: null,
     title: '',
     pages: [],
+    totalPages: 0,
     status: 'idle',
     error: '',
+    selectedText: '',
+    zoom: 1.35,
+    isFullscreen: false,
   });
   const mediaRecorderRef = useRef(null);
   const recordingChunksRef = useRef([]);
@@ -244,6 +323,7 @@ function App() {
   const chatMediaRecorderRef = useRef(null);
   const chatRecordingChunksRef = useRef([]);
   const chatStreamRef = useRef(null);
+  const pdfDocumentRef = useRef(null);
 
   const activeSection = useMemo(
     () => sections.find((section) => section._id === activeSectionId) || sections[0],
@@ -377,6 +457,35 @@ function App() {
     [recordedAudioUrls]
   );
 
+  useEffect(() => {
+    if (!pdfReader.file) return undefined;
+
+    function updateSelectedPdfText() {
+      const selection = window.getSelection();
+      const documentElement = pdfDocumentRef.current;
+
+      if (!selection || selection.isCollapsed || !documentElement) {
+        setPdfReader((current) => ({ ...current, selectedText: '' }));
+        return;
+      }
+
+      const selectedInsidePdf =
+        documentElement.contains(selection.anchorNode) &&
+        documentElement.contains(selection.focusNode);
+
+      setPdfReader((current) => ({
+        ...current,
+        selectedText: selectedInsidePdf ? selection.toString().trim() : '',
+      }));
+    }
+
+    document.addEventListener('selectionchange', updateSelectedPdfText);
+
+    return () => {
+      document.removeEventListener('selectionchange', updateSelectedPdfText);
+    };
+  }, [pdfReader.file]);
+
   function resetResourceModal() {
     recordedAudioUrls.forEach((url) => URL.revokeObjectURL(url));
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -433,13 +542,44 @@ function App() {
 
   function closePdfReader() {
     window.getSelection()?.removeAllRanges();
+
     setPdfReader({
       file: null,
       title: '',
       pages: [],
+      totalPages: 0,
       status: 'idle',
       error: '',
+      selectedText: '',
+      zoom: 1.35,
+      isFullscreen: false,
     });
+  }
+
+  function changePdfZoom(delta) {
+    setPdfReader((current) => ({
+      ...current,
+      zoom: Math.min(PDF_ZOOM_MAX, Math.max(PDF_ZOOM_MIN, current.zoom + delta)),
+    }));
+  }
+
+  function handlePdfWheel(event) {
+    if (!event.ctrlKey && !event.metaKey) return;
+
+    event.preventDefault();
+    const zoomDelta = Math.max(-0.25, Math.min(0.25, -event.deltaY * 0.002));
+    changePdfZoom(zoomDelta);
+  }
+
+  function resetPdfZoom() {
+    setPdfReader((current) => ({ ...current, zoom: 1.35 }));
+  }
+
+  function togglePdfFullscreen() {
+    setPdfReader((current) => ({
+      ...current,
+      isFullscreen: !current.isFullscreen,
+    }));
   }
 
   async function openPdfReader(pdf) {
@@ -449,46 +589,51 @@ function App() {
       file: pdf,
       title,
       pages: [],
+      totalPages: 0,
       status: 'loading',
       error: '',
+      selectedText: '',
+      zoom: pdfReader.zoom || 1.35,
+      isFullscreen: false,
     });
 
     try {
-      const document = await pdfjsLib.getDocument(`${API_BASE}${pdf.url}`).promise;
+      const document = await pdfjsLib.getDocument({ url: `${API_BASE}${pdf.url}` }).promise;
       const pages = [];
 
       for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
         const page = await document.getPage(pageNumber);
-        const textContent = await page.getTextContent();
-        const text = textContent.items
-          .map((item) => item.str)
-          .join(' ')
-          .replace(/\s+/g, ' ')
-          .trim();
-
-        pages.push({ pageNumber, text });
+        pages.push({ pageNumber, page });
       }
 
       setPdfReader({
         file: pdf,
         title,
         pages,
+        totalPages: document.numPages,
         status: 'ready',
         error: '',
+        selectedText: '',
+        zoom: pdfReader.zoom || 1.35,
+        isFullscreen: false,
       });
     } catch (error) {
       setPdfReader({
         file: pdf,
         title,
         pages: [],
+        totalPages: 0,
         status: 'error',
         error: error.message || 'Unable to read this PDF.',
+        selectedText: '',
+        zoom: pdfReader.zoom || 1.35,
+        isFullscreen: false,
       });
     }
   }
 
   function sendSelectedPdfTextToChatGpt() {
-    const selectedText = window.getSelection()?.toString().trim() || '';
+    const selectedText = pdfReader.selectedText || window.getSelection()?.toString().trim() || '';
 
     if (!selectedText) {
       setPdfReader((current) => ({
@@ -1327,16 +1472,48 @@ function App() {
 
             {pdfReader.file ? (
               <div className="modal-backdrop" role="presentation">
-                <section className="panel modal-panel pdf-reader-panel" aria-label="PDF text reader">
+                <section
+                  className={`panel modal-panel pdf-reader-panel ${
+                    pdfReader.isFullscreen ? 'is-fullscreen' : ''
+                  }`}
+                  aria-label="PDF opener"
+                >
                   <div className="modal-header">
-                    <div>
-                      <p className="eyebrow">PDF Reader</p>
+                    <div className="pdf-reader-title">
+                      <p className="eyebrow">PDF Opener</p>
                       <h3>{pdfReader.title}</h3>
+                      {pdfReader.totalPages ? (
+                        <p className="meta-line">{pdfReader.totalPages} pages</p>
+                      ) : null}
                     </div>
                     <div className="pdf-reader-actions">
+                      <div className="pdf-zoom-controls" aria-label="PDF zoom controls">
+                        <button
+                          className="ghost-button"
+                          type="button"
+                          disabled={pdfReader.zoom <= PDF_ZOOM_MIN}
+                          onClick={() => changePdfZoom(-PDF_ZOOM_STEP)}
+                        >
+                          Zoom Out
+                        </button>
+                        <button className="ghost-button" type="button" onClick={resetPdfZoom}>
+                          {Math.round(pdfReader.zoom * 100)}%
+                        </button>
+                        <button
+                          className="ghost-button"
+                          type="button"
+                          disabled={pdfReader.zoom >= PDF_ZOOM_MAX}
+                          onClick={() => changePdfZoom(PDF_ZOOM_STEP)}
+                        >
+                          Zoom In
+                        </button>
+                      </div>
+                      <button className="ghost-button" type="button" onClick={togglePdfFullscreen}>
+                        {pdfReader.isFullscreen ? 'Exit Full Page' : 'Full Page'}
+                      </button>
                       <button
                         type="button"
-                        disabled={pdfReader.status !== 'ready'}
+                        disabled={pdfReader.status !== 'ready' || !pdfReader.selectedText}
                         onClick={sendSelectedPdfTextToChatGpt}
                       >
                         Send Highlight to ChatGPT
@@ -1351,18 +1528,25 @@ function App() {
 
                   {pdfReader.status === 'loading' ? (
                     <div className="empty-state">
-                      <h3>Reading PDF text...</h3>
+                      <h3>Opening PDF...</h3>
                       <p>This may take a moment for longer papers.</p>
                     </div>
                   ) : null}
 
                   {pdfReader.status === 'ready' ? (
-                    <div className="pdf-reader-text" aria-label="Selectable PDF text">
+                    <div
+                      className="pdf-document"
+                      ref={pdfDocumentRef}
+                      aria-label="Selectable PDF document"
+                      onWheel={handlePdfWheel}
+                    >
                       {pdfReader.pages.map((page) => (
-                        <article className="pdf-page-text" key={page.pageNumber}>
-                          <span>Page {page.pageNumber}</span>
-                          <p>{page.text || 'No selectable text found on this page.'}</p>
-                        </article>
+                        <PdfPage
+                          key={page.pageNumber}
+                          page={page.page}
+                          pageNumber={page.pageNumber}
+                          scale={pdfReader.zoom}
+                        />
                       ))}
                     </div>
                   ) : null}
@@ -1455,15 +1639,12 @@ function App() {
                           <strong title={getFileName(pdf, 'PDF file')}>
                             {getFileName(pdf, 'PDF file')}
                           </strong>
-                          <a href={`${API_BASE}${pdf.url}`} target="_blank" rel="noreferrer">
-                            Open PDF · {formatBytes(pdf.size)}
-                          </a>
                           <button
-                            className="asset-delete-button"
+                            className="asset-open-button"
                             type="button"
                             onClick={() => openPdfReader(pdf)}
                           >
-                            Text Reader
+                            Open PDF · {formatBytes(pdf.size)}
                           </button>
                           <span>Added by {getFileAddedBy(pdf, resource)}</span>
                           <span>{formatDateTime(getFileAddedAt(pdf, resource))}</span>
