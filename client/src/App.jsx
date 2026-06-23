@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import * as pdfjsLib from 'pdfjs-dist/build/pdf.mjs';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import './App.css';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 function normalizeApiBase(value) {
   return (value || 'http://localhost:5001')
@@ -10,6 +14,8 @@ function normalizeApiBase(value) {
 
 const API_BASE = normalizeApiBase(import.meta.env.VITE_API_BASE_URL);
 const AUTH_STORAGE_KEY = 'research-manager-auth';
+const CHATGPT_RESEARCH_PROMPT =
+  'Translate this research paper part into easy English. exam difficult keywords.';
 
 const emptySection = {
   title: '',
@@ -171,6 +177,11 @@ function getResourceChatItems(resource) {
   });
 }
 
+function buildChatGptUrl(selectedText) {
+  const prompt = `${CHATGPT_RESEARCH_PROMPT}\n\n${selectedText}`;
+  return `https://chatgpt.com/?q=${encodeURIComponent(prompt)}`;
+}
+
 function matchesResourceSearch(resource, searchTerm) {
   const query = searchTerm.trim().toLowerCase();
   if (!query) return true;
@@ -220,6 +231,13 @@ function App() {
   const [isUploadingChatAudio, setIsUploadingChatAudio] = useState(false);
   const [message, setMessage] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [pdfReader, setPdfReader] = useState({
+    file: null,
+    title: '',
+    pages: [],
+    status: 'idle',
+    error: '',
+  });
   const mediaRecorderRef = useRef(null);
   const recordingChunksRef = useRef([]);
   const streamRef = useRef(null);
@@ -411,6 +429,76 @@ function App() {
     setChatForm(emptyChatForm);
     setChatRecordingStatus('idle');
     setChatRecordingSeconds(0);
+  }
+
+  function closePdfReader() {
+    window.getSelection()?.removeAllRanges();
+    setPdfReader({
+      file: null,
+      title: '',
+      pages: [],
+      status: 'idle',
+      error: '',
+    });
+  }
+
+  async function openPdfReader(pdf) {
+    const title = getFileName(pdf, 'PDF file');
+    setMessage('');
+    setPdfReader({
+      file: pdf,
+      title,
+      pages: [],
+      status: 'loading',
+      error: '',
+    });
+
+    try {
+      const document = await pdfjsLib.getDocument(`${API_BASE}${pdf.url}`).promise;
+      const pages = [];
+
+      for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+        const page = await document.getPage(pageNumber);
+        const textContent = await page.getTextContent();
+        const text = textContent.items
+          .map((item) => item.str)
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        pages.push({ pageNumber, text });
+      }
+
+      setPdfReader({
+        file: pdf,
+        title,
+        pages,
+        status: 'ready',
+        error: '',
+      });
+    } catch (error) {
+      setPdfReader({
+        file: pdf,
+        title,
+        pages: [],
+        status: 'error',
+        error: error.message || 'Unable to read this PDF.',
+      });
+    }
+  }
+
+  function sendSelectedPdfTextToChatGpt() {
+    const selectedText = window.getSelection()?.toString().trim() || '';
+
+    if (!selectedText) {
+      setPdfReader((current) => ({
+        ...current,
+        error: 'Highlight text in the reader first.',
+      }));
+      return;
+    }
+
+    window.open(buildChatGptUrl(selectedText), '_blank', 'noopener,noreferrer');
   }
 
   async function uploadChatRecording(audioFile) {
@@ -1237,6 +1325,51 @@ function App() {
               </div>
             ) : null}
 
+            {pdfReader.file ? (
+              <div className="modal-backdrop" role="presentation">
+                <section className="panel modal-panel pdf-reader-panel" aria-label="PDF text reader">
+                  <div className="modal-header">
+                    <div>
+                      <p className="eyebrow">PDF Reader</p>
+                      <h3>{pdfReader.title}</h3>
+                    </div>
+                    <div className="pdf-reader-actions">
+                      <button
+                        type="button"
+                        disabled={pdfReader.status !== 'ready'}
+                        onClick={sendSelectedPdfTextToChatGpt}
+                      >
+                        Send Highlight to ChatGPT
+                      </button>
+                      <button className="ghost-button" type="button" onClick={closePdfReader}>
+                        Close
+                      </button>
+                    </div>
+                  </div>
+
+                  {pdfReader.error ? <div className="status-line">{pdfReader.error}</div> : null}
+
+                  {pdfReader.status === 'loading' ? (
+                    <div className="empty-state">
+                      <h3>Reading PDF text...</h3>
+                      <p>This may take a moment for longer papers.</p>
+                    </div>
+                  ) : null}
+
+                  {pdfReader.status === 'ready' ? (
+                    <div className="pdf-reader-text" aria-label="Selectable PDF text">
+                      {pdfReader.pages.map((page) => (
+                        <article className="pdf-page-text" key={page.pageNumber}>
+                          <span>Page {page.pageNumber}</span>
+                          <p>{page.text || 'No selectable text found on this page.'}</p>
+                        </article>
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
+              </div>
+            ) : null}
+
             <div className="resource-list">
               {activeSection.resources.length === 0 ? (
                 <div className="empty-state">
@@ -1325,6 +1458,13 @@ function App() {
                           <a href={`${API_BASE}${pdf.url}`} target="_blank" rel="noreferrer">
                             Open PDF · {formatBytes(pdf.size)}
                           </a>
+                          <button
+                            className="asset-delete-button"
+                            type="button"
+                            onClick={() => openPdfReader(pdf)}
+                          >
+                            Text Reader
+                          </button>
                           <span>Added by {getFileAddedBy(pdf, resource)}</span>
                           <span>{formatDateTime(getFileAddedAt(pdf, resource))}</span>
                           <button

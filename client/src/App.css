@@ -870,6 +870,53 @@ audio {
   max-width: 760px;
 }
 
+.pdf-reader-panel {
+  max-width: 980px;
+}
+
+.pdf-reader-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  justify-content: flex-end;
+}
+
+.pdf-reader-text {
+  background: #f7faf5;
+  border: 1px solid #d7e0d3;
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  max-height: min(680px, calc(100vh - 210px));
+  overflow: auto;
+  padding: 14px;
+}
+
+.pdf-page-text {
+  background: #ffffff;
+  border: 1px solid #dfe5dc;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+}
+
+.pdf-page-text > span {
+  color: #2f6f58;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.pdf-page-text p {
+  color: #23372d;
+  line-height: 1.65;
+  margin: 0;
+  user-select: text;
+  white-space: pre-wrap;
+}
+
 .voice-thread-popup {
   max-height: min(620px, calc(100vh - 190px));
   overflow: auto;
@@ -1019,6 +1066,7 @@ audio {
   }
 
   .card-actions,
+  .pdf-reader-actions,
   .recorder-actions,
   .toolbar-actions,
   .modal-actions,
